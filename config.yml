@@ -7,4 +7,4 @@ process_num: 1  # 每张gpu固定启动的进程数【最好就用单卡单线�
 # 是否使用该功能
 norm_30fps: true
 split: true
-mul2single: true
+crowd2solo: true

@@ -2,7 +2,7 @@
 
 配置：先clone本项目，然后按照 https://github.com/facebookresearch/sam3 进行环境配置
 
-模型权重：将/media/data/xuhao_data/sam3-main/checkpoints复制到你的项目目录下
+模型权重：将/media/data/xuhao_data/crowd2solo/checkpoints复制到你的项目目录下
 
 功能测试：直接修改内部的超参数，运行单个脚本
 

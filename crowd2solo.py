@@ -730,4 +730,4 @@ if __name__ == "__main__":
     elapsed_seconds = round(time.perf_counter() - start_time)
     hours, remainder = divmod(elapsed_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    print(f"multi2single运行时间：{hours}时{minutes}分{seconds}秒")
+    print(f"crowd2solo运行时间：{hours}时{minutes}分{seconds}秒")

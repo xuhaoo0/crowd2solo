@@ -2,7 +2,7 @@
 基本功能：
 norm_30fps：将原视频帧率统一为30 FPS，并覆盖原视频
 split：切一条视频
-mul2single：多人视频 -> 主要人物的单人视频
+crowd2solo：多人视频 -> 主要人物的单人视频
 '''
 
 '''
@@ -16,7 +16,7 @@ mul2single：多人视频 -> 主要人物的单人视频
 如果不split：
   直接用该mp4作为“_001”构建类似“split”的结果
 对切出来的每个视频（结合config.yml里面的字段决定是否调用该py、传入的参数值是什么）：
-  用命令行调用mul2single
+  用命令行调用crowd2solo
 '''
 
 '''
@@ -26,10 +26,10 @@ mul2single：多人视频 -> 主要人物的单人视频
 - a/b/c
   - c_001
     - c_001.mp4  # from split
-    - c_001_masks  # from mul2single
-    - c_001_selected_person.txt  # from mul2single
-    - c_001_person3.mp4  # from mul2single【用于重建】
-    - c_001_person5.mp4  # from mul2single【用于重建】
+    - c_001_masks  # from crowd2solo
+    - c_001_selected_person.txt  # from crowd2solo
+    - c_001_person3.mp4  # from crowd2solo【用于重建】
+    - c_001_person5.mp4  # from crowd2solo【用于重建】
     ...
   - c_002
     ...
@@ -159,9 +159,9 @@ def process_video(
     )
 
     for clip_video in clip_videos:
-        if config["mul2single"]:
+        if config["crowd2solo"]:
             run_script(
-                "mul2single.py",
+                "crowd2solo.py",
                 "--input_video", clip_video,
                 "--device", device,
                 "--sam3_device", *config["sam3_device"],
