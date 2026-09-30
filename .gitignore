@@ -154,3 +154,5 @@ Thumbs.db
 
 dance/
 *.mp4
+temp/
+temp_out/

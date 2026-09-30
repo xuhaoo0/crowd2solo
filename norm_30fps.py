@@ -126,7 +126,7 @@ if __name__ == "__main__":
     start_time = time.perf_counter()
 
     # 【用于测试】
-    input_video = Path("origin_data/test_fix/xk.mp4")
+    input_video = Path("temp/张资晃/张资晃.mp4")
     device = 0
 
     # 从外部读取

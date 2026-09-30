@@ -1,0 +1,10 @@
+input_dir: 'temp/input'  # 输入的根文件夹，里面所有的mp4都会被处理
+output_dir: 'temp/output'  # 输出的根文件夹，会保留输入文件夹的结构
+device: [6]  # 常规使用的显卡
+sam3_device: [6, 7]  # sam3使用的显卡，需要2张，防止oom
+process_num: 1  # 每张gpu固定启动的进程数【最好就用单卡单线程】
+
+# 是否使用该功能
+norm_30fps: true
+split: true
+mul2single: true

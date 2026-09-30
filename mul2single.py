@@ -1,12 +1,12 @@
 '''
 输入一条多人视频，输出最主要的k个人物的单人视频和其他信息：
 分为3步：用sam3提取所有人的mask、根据mask选择主要的k个人、生成单人的视频
-其中最后一步详细解释：根据所有人的mask视频，在原视频里面把它们全部去掉，然后靠剩下的像素恢复环境，最后把目标人物覆盖回去，这样得到他的单人视频
+其中最后一步：根据所有人的mask视频，在原视频里面把它们全部去掉，然后靠剩下的像素恢复环境，最后把目标人物覆盖回去，这样得到他的单人视频
 
 args:
 - input_video，例如a/b/c.mp4，表示多人视频
-- device，例如"0"，表示用到的显卡
-- sam3_device，例如"0,1"，表示使用这些卡分摊一个get_masks.py的任务，防止oom
+- device，例如0，表示用到的显卡
+- sam3_device，例如[0,1]，表示使用这些卡分摊一个get_masks.py的任务，防止oom
 
 输出：
 a/b
@@ -450,6 +450,29 @@ def start_encoder(
     return subprocess.Popen(command, stdin=subprocess.PIPE)
 
 
+def find_mask_segment(
+    mask_dir: Path,
+    frame_count: int,
+) -> tuple[int, int] | None:
+    """扫描人物的 mask，返回第一次出现到随后第一次消失之间的闭区间。"""
+    start_frame = None
+
+    for frame_index in range(frame_count):
+        mask = cv2.imread(
+            str(mask_dir / f"{frame_index:06d}.png"),
+            cv2.IMREAD_GRAYSCALE,
+        )
+        if start_frame is None and mask.any():
+            start_frame = frame_index
+        elif start_frame is not None and not mask.any():
+            return start_frame, frame_index - 1
+
+    if start_frame is None:
+        return None
+
+    return start_frame, frame_count - 1
+
+
 def create_single_person_videos(
     video_path: Path,
     masks_dir: Path,
@@ -459,12 +482,33 @@ def create_single_person_videos(
     inpaint_radius: int,
     device: int,
 ) -> None:
-    """先重建无人物环境，再分别贴回选中的目标人物。"""
+    """先重建无人物环境，再分别贴回选中的目标人物，只保留每个人出现的帧段。"""
     person_dirs = sorted(
         [path for path in masks_dir.glob("person*") if path.is_dir()],
         key=person_number,
     )
     frame_count = len(list((person_dirs[0] / "mask").glob("*.png")))
+
+    # 预扫描每个人物的 mask，只保留第一次出现到随后第一次消失的帧段
+    segments = {}
+    for name in selected_people:
+        segment = find_mask_segment(masks_dir / name / "mask", frame_count)
+        if segment is None:
+            print(f"警告：{name} 全程不可见，跳过单人视频")
+            continue
+        segments[name] = segment
+        start_frame, end_frame = segment
+        print(
+            f"{name}: frame {start_frame} ~ {end_frame}，"
+            f"共 {end_frame - start_frame + 1} 帧"
+        )
+
+    if not segments:
+        print("所有人物都不可见，未生成单人视频。")
+        return
+
+    min_start = min(start_frame for start_frame, _ in segments.values())
+    max_end = max(end_frame for _, end_frame in segments.values())
 
     capture = cv2.VideoCapture(str(video_path))
     fps = capture.get(cv2.CAP_PROP_FPS)
@@ -483,14 +527,20 @@ def create_single_person_videos(
             width,
             height,
             fps,
-            frame_count,
+            end_frame - start_frame + 1,
             device,
         )
-        for name in selected_people
+        for name, (start_frame, end_frame) in segments.items()
     }
 
     for frame_index in range(frame_count):
+        print(f"\r正在处理：{frame_index + 1}/{frame_count}", end="", flush=True)
         _, frame = capture.read()
+
+        # 所有人物帧段之外的部分直接跳过，不做重建
+        if frame_index < min_start or frame_index > max_end:
+            continue
+
         masks = {
             person_dir.name: cv2.imread(
                 str(person_dir / "mask" / f"{frame_index:06d}.png"),
@@ -510,20 +560,19 @@ def create_single_person_videos(
         )
 
         # 在同一张重建环境上，分别贴回目标人物的原始像素
-        for target_name in selected_people:
-            single_person_frame = background.copy()
-            target_mask = masks[target_name] > 0
-            single_person_frame[target_mask] = frame[target_mask]
-            encoders[target_name].stdin.write(single_person_frame.tobytes())
-
-        print(f"\r正在处理：{frame_index + 1}/{frame_count}", end="", flush=True)
+        for target_name, (start_frame, end_frame) in segments.items():
+            if start_frame <= frame_index <= end_frame:
+                single_person_frame = background.copy()
+                target_mask = masks[target_name] > 0
+                single_person_frame[target_mask] = frame[target_mask]
+                encoders[target_name].stdin.write(single_person_frame.tobytes())
 
     capture.release()
     for encoder in encoders.values():
         encoder.stdin.close()
         encoder.wait()
 
-    print(f"\n单人视频生成完成：{', '.join(selected_people)}")
+    print(f"\n单人视频生成完成：{', '.join(segments)}")
 
 
 def process_video(
@@ -590,9 +639,9 @@ def process_video(
 
 def parse_cli_paths(
     input_video: Path,
-    device: str,
-    sam3_device: str,
-) -> tuple[Path, str, str]:
+    device: int,
+    sam3_device: list[int],
+) -> tuple[Path, int, list[int]]:
     """从命令行读取参数，未传入的参数沿用测试值。"""
     parser = argparse.ArgumentParser(
         description="输入一条多人视频，输出主要人物的单人视频"
@@ -609,7 +658,7 @@ def parse_cli_paths(
 
     parser.add_argument(
         "--device",
-        type=str,
+        type=int,
         default=device,
         help="GPU 编号，例如 0，用于视频编码",
     )
@@ -618,9 +667,10 @@ def parse_cli_paths(
         "--sam3_device",
         "--sam3-device",
         dest="sam3_device",
-        type=str,
+        nargs="+",
+        type=int,
         default=sam3_device,
-        help='GPU 编号，例如 "0,1"，使用这些卡分摊 SAM3 任务，防止oom',
+        help="GPU 编号列表，例如 0 1，使用这些卡分摊 SAM3 任务，防止oom",
     )
 
     args = parser.parse_args()
@@ -632,9 +682,9 @@ if __name__ == "__main__":
     start_time = time.perf_counter()
 
     # 【用于测试】
-    input_video = Path("dance/dance/boomboom_iconx.mp4")
-    device = "0"  # 用于视频编码
-    sam3_device = "0,1"  # 使用多卡分摊 SAM3 任务，防止oom
+    input_video = Path("temp_out/张资晃/张资晃/张资晃_001/张资晃_001.mp4")
+    device = 6  # 用于视频编码
+    sam3_device = [6, 7]  # 使用多卡分摊 SAM3 任务，防止oom
 
     # 从外部读取
     input_video, device, sam3_device = parse_cli_paths(
@@ -647,10 +697,8 @@ if __name__ == "__main__":
     PROJECT_ROOT = Path(__file__).resolve().parent
     CHECKPOINT_PATH = PROJECT_ROOT / "checkpoints/sam3.pt"
     PROMPT = "person"
-    sam3_gpu_ids = [int(gpu_id) for gpu_id in sam3_device.split(",")]
-    device = int(device)
 
-    KEEP_TOP_K = 5  # 保留最主要的5个人
+    KEEP_TOP_K = 3  # 保留最主要的3个人
     SELECTION_FRAMES = 0.5  # 使用前 50% 的帧
     ANALYSIS_SCALE = 0.5  # 缩小 mask 后计算，加快处理速度
     PROMINENCE_WEIGHT = 0.60
@@ -667,7 +715,7 @@ if __name__ == "__main__":
         input_video,
         CHECKPOINT_PATH,
         PROMPT,
-        sam3_gpu_ids,
+        sam3_device,
         device,
         KEEP_TOP_K,
         SELECTION_FRAMES,

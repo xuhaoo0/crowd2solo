@@ -88,14 +88,13 @@ def get_video_frame_count(input_video: Path) -> int:
 def copy_source_json(
     input_video: Path,
     video_output_dir: Path,
-) -> Path:
-    """把原视频目录下的 JSON 改为视频同名后复制到输出目录。"""
+) -> Path | None:
+    """把原视频目录下的 JSON 改为视频同名后复制到输出目录；没有 JSON 则跳过。"""
     json_files = sorted(input_video.parent.glob("*.json"))
 
     if not json_files:
-        raise FileNotFoundError(
-            f"未找到原视频目录下的 JSON：{input_video.parent}"
-        )
+        print(f"未找到原视频目录下的 JSON，跳过复制：{input_video.parent}")
+        return None
     if len(json_files) > 1:
         raise RuntimeError(
             f"原视频目录下存在多个 JSON，无法确定要复制的文件："
@@ -293,9 +292,9 @@ if __name__ == "__main__":
     start_time = time.perf_counter()
 
     # 【用于测试】
-    input_dir = Path("origin_data/batch1")  # 必须是input_video的前缀
-    output_dir = Path("origin_data/test_out")
-    input_video = Path("origin_data/batch1/武当张资恍/2026-08-28-7679082047969286810/武当张资恍-2026-08-28-7679082047969286810.mp4")
+    input_dir = Path("temp")  # 必须是input_video的前缀
+    output_dir = Path("temp_out")
+    input_video = Path("temp/张资晃/张资晃.mp4")
     device = 0
 
     # 从外部读取
@@ -322,7 +321,8 @@ if __name__ == "__main__":
 
     print(f"开始检测：{input_video}")
     print(f"输出目录：{video_output_dir}")
-    print(f"已复制原 JSON：{source_json_output}")
+    if source_json_output is not None:
+        print(f"已复制原 JSON：{source_json_output}")
     print(f"使用 GPU：{device}")
 
     ranges, fps, frame_count = detect_ranges(input_video, device)
