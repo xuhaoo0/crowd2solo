@@ -73,7 +73,6 @@ def create_single_person_videos(
     fps = capture.get(cv2.CAP_PROP_FPS)
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    capture.read()  # 去掉原视频第一帧
 
     output_dir.mkdir(parents=True, exist_ok=True)
     kernel_size = mask_dilate_pixels * 2 + 1
@@ -138,7 +137,7 @@ if __name__ == "__main__":
     VIDEO_DIR = PROJECT_ROOT / "dance/dance"
 
     # 处理参数
-    TOP_K = 5  # 选择排名前 K 的人物进行单独视频生成，或者定一个score的阈值
+    TOP_K = 3  # 选择排名前 K 的人物进行单独视频生成，或者定一个score的阈值
     MASK_DILATE_PIXELS = 5  # 所有人物的 mask 向外扩展 5 像素
     INPAINT_RADIUS = 5
 

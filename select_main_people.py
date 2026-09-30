@@ -1,5 +1,16 @@
 '''
 选择视频中主要人物，保存在txt文件
+
+args:
+- masks_dir，例如a/b/c_masks
+
+输出：
+a/b/c_masks
+- person1
+    - mask
+        00000.png
+    - person1_mask.mp4
+- person2
 '''
 
 from pathlib import Path
@@ -136,7 +147,7 @@ if __name__ == "__main__":
     # 所有超参数都在这里直接修改
     PROJECT_ROOT = Path(__file__).resolve().parent
     OUTPUT_ROOT = PROJECT_ROOT / "dance/mask"
-    KEEP_TOP_K = 5  # 保留最主要的5个人
+    KEEP_TOP_K = 3  # 保留最主要的k个人
     SELECTION_FRAMES = 0.5  # 使用前 50% 的帧
     ANALYSIS_SCALE = 0.5  # 缩小 mask 后计算，加快处理速度
     PROMINENCE_WEIGHT = 0.60

@@ -1,14 +1,28 @@
 '''
 保存多人视频里面每个人的mask
-运行之前先切视频，不要有镜头切换
+
+args:
+- input_video，例如a/b/c.mp4
+- device，例如"0,1"，表示使用这些卡分摊一个任务，防止oom
+
+输出：
+a/b/c_masks
+- person1
+    - mask
+        00000.png
+    - person1_mask.mp4
+- person2
+
 '''
 
+import argparse
 import gc
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 # 减少长视频推理时的显存碎片
@@ -20,7 +34,7 @@ import torch
 from sam3.model_builder import build_sam3_video_predictor
 
 
-def get_video_info(video_path):
+def get_video_info(video_path: Path) -> tuple[str, int, int]:
     """读取原视频的帧率和分辨率。"""
     command = [
         "ffprobe",
@@ -40,8 +54,8 @@ def get_video_info(video_path):
     return stream["avg_frame_rate"], stream["width"], stream["height"]
 
 
-def extract_frames_without_first(video_path, frame_dir):
-    """使用 ffmpeg 去掉第一帧，并将剩余帧保存到临时目录。"""
+def extract_frames(video_path: Path, frame_dir: Path) -> int:
+    """使用 ffmpeg 将所有帧保存到临时目录。"""
     command = [
         "ffmpeg",
         "-y",
@@ -49,8 +63,6 @@ def extract_frames_without_first(video_path, frame_dir):
         "error",
         "-i",
         str(video_path),
-        "-vf",
-        "select=gt(n\\,0)",
         "-vsync",
         "0",
         "-start_number",
@@ -62,12 +74,12 @@ def extract_frames_without_first(video_path, frame_dir):
 
 
 def save_masks_with_sam3(
-    frame_dir,
-    output_dir,
-    checkpoint_path,
-    prompt,
-    gpu_ids,
-):
+    frame_dir: Path,
+    output_dir: Path,
+    checkpoint_path: Path,
+    prompt: str,
+    gpu_ids: list[int],
+) -> dict[int, set[int]]:
     """使用文本提示检测并跟踪所有人物，逐帧保存人物 mask。"""
     predictor = build_sam3_video_predictor(
         checkpoint_path=str(checkpoint_path),
@@ -149,7 +161,13 @@ def save_masks_with_sam3(
     return saved_frames
 
 
-def fill_missing_masks(output_dir, saved_frames, frame_count, width, height):
+def fill_missing_masks(
+    output_dir: Path,
+    saved_frames: dict[int, set[int]],
+    frame_count: int,
+    width: int,
+    height: int,
+) -> None:
     """人物不可见的帧使用全黑 mask 补齐。"""
     empty_mask = Image.new("L", (width, height), 0)
 
@@ -160,7 +178,12 @@ def fill_missing_masks(output_dir, saved_frames, frame_count, width, height):
                 empty_mask.save(mask_dir / f"{frame_index:06d}.png")
 
 
-def create_mask_videos(output_dir, person_count, frame_count, fps):
+def create_mask_videos(
+    output_dir: Path,
+    person_count: int,
+    frame_count: int,
+    fps: str,
+) -> None:
     """将每个人的二值 mask 合成为 MP4 可视化视频。"""
     for person_index in range(1, person_count + 1):
         person_dir = output_dir / f"person{person_index}"
@@ -188,16 +211,22 @@ def create_mask_videos(output_dir, person_count, frame_count, fps):
         subprocess.run(command, check=True)
 
 
-def process_video(video_path, output_dir, checkpoint_path, prompt, gpu_ids):
-    """执行去首帧、人物分割、mask 补齐和视频生成。"""
+def process_video(
+    video_path: Path,
+    output_dir: Path,
+    checkpoint_path: Path,
+    prompt: str,
+    gpu_ids: list[int],
+) -> None:
+    """执行人物分割、mask 补齐和视频生成。"""
     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True)
 
     with tempfile.TemporaryDirectory(prefix="sam3_video_frames_") as temp_dir:
         frame_dir = Path(temp_dir)
         fps, width, height = get_video_info(video_path)
-        frame_count = extract_frames_without_first(video_path, frame_dir)
-        print(f"去掉第一帧后共 {frame_count} 帧，开始运行 SAM3。")
+        frame_count = extract_frames(video_path, frame_dir)
+        print(f"共 {frame_count} 帧，开始运行 SAM3。")
 
         saved_frames = save_masks_with_sam3(
             frame_dir,
@@ -224,32 +253,71 @@ def process_video(video_path, output_dir, checkpoint_path, prompt, gpu_ids):
     print(f"结果保存在：{output_dir}")
 
 
+def parse_cli_paths(
+    input_video: Path,
+    device: str,
+) -> tuple[Path, str]:
+    """从命令行读取参数，未传入的参数沿用测试值。"""
+    parser = argparse.ArgumentParser(description="保存多人视频里面每个人的mask")
+
+    parser.add_argument(
+        "--input_video",
+        "--input-video",
+        dest="input_video",
+        type=Path,
+        default=input_video,
+        help="需要分割人物的视频路径",
+    )
+
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=device,
+        help='GPU 编号，例如 "0,1"，使用这些卡分摊一个任务，防止oom',
+    )
+
+    args = parser.parse_args()
+
+    return args.input_video, args.device
+
+
 if __name__ == "__main__":
+    start_time = time.perf_counter()
+
+    # 【用于测试】
+    input_video = Path("dance/dance/boomboom_iconx.mp4")
+    device = "0,1"  # 使用多卡分摊一个任务，防止oom
+
+    # 从外部读取
+    input_video, device = parse_cli_paths(input_video, device)
+
     # 所有超参数都在这里直接修改
     PROJECT_ROOT = Path(__file__).resolve().parent
-    VIDEO_DIR = PROJECT_ROOT / "dance/dance"
     CHECKPOINT_PATH = PROJECT_ROOT / "checkpoints/sam3.pt"
     PROMPT = "person"
-    GPU_IDS = [0, 1]  # 使用多卡分摊一个任务，防止oom
+    gpu_ids = [int(gpu_id) for gpu_id in device.split(",")]
 
-    # 依次处理目录下的所有 MP4 视频，每个视频都会去掉第一帧
-    for video_path in sorted(VIDEO_DIR.glob("*.mp4")):
-        output_dir = VIDEO_DIR.parent / "mask" / video_path.stem
+    # 输出目录：a/b/c.mp4 → a/b/c_masks
+    output_dir = input_video.parent / f"{input_video.stem}_masks"
 
-        if output_dir.exists():  # 如果存在目标文件夹，就跳过
-            print(f"跳过已存在的结果：{output_dir}")
-            continue
-
-        print(f"\n开始处理：{video_path.name}")
+    if output_dir.exists():  # 如果存在目标文件夹，就跳过
+        print(f"跳过已存在的结果：{output_dir}")
+    else:
+        print(f"\n开始处理：{input_video}")
         try:
             process_video(
-                video_path,
+                input_video,
                 output_dir,
                 CHECKPOINT_PATH,
                 PROMPT,
-                GPU_IDS,
+                gpu_ids,
             )
         except Exception:
             # 失败时删除不完整结果，方便下次重新处理
             shutil.rmtree(output_dir, ignore_errors=True)
             raise
+
+    elapsed_seconds = round(time.perf_counter() - start_time)
+    hours, remainder = divmod(elapsed_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    print(f"segment_people运行时间：{hours}时{minutes}分{seconds}秒")
